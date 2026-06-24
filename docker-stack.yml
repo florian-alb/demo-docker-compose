@@ -1,0 +1,19 @@
+services:
+  backend:
+    image: ${DOCKERHUB_USERNAME}/app-backend:${IMAGE_TAG}
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME}/app-frontend:${IMAGE_TAG}
+    ports:
+      - "80:80"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure

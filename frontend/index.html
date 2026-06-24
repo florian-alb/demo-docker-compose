@@ -1,15 +1,278 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=1920, initial-scale=1.0">
-    <title>Document</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Demo Swarm</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #14213d;
+      background: #f5f7fb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px 16px;
+    }
+
+    main {
+      width: min(920px, 100%);
+      background: #ffffff;
+      border: 1px solid #d8dee9;
+      border-radius: 8px;
+      padding: 32px;
+      box-shadow: 0 18px 45px rgba(20, 33, 61, 0.12);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: flex-start;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 4vw, 44px);
+    }
+
+    p {
+      margin: 0;
+      color: #52616f;
+      line-height: 1.5;
+    }
+
+    button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 6px;
+      background: #0f766e;
+      color: #ffffff;
+      cursor: pointer;
+      font-weight: 700;
+      padding: 12px 16px;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: #52616f;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f59e0b;
+    }
+
+    .status-dot.ok {
+      background: #16a34a;
+    }
+
+    .status-dot.error {
+      background: #dc2626;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .metric {
+      border: 1px solid #d8dee9;
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 96px;
+      overflow-wrap: anywhere;
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 8px;
+      color: #6b7280;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .value {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 18px;
+      color: #111827;
+    }
+
+    .history {
+      border-top: 1px solid #d8dee9;
+      padding-top: 20px;
+    }
+
+    ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0;
+      margin: 12px 0 0;
+      list-style: none;
+    }
+
+    li {
+      border: 1px solid #99f6e4;
+      border-radius: 999px;
+      background: #f0fdfa;
+      color: #115e59;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 14px;
+      padding: 8px 10px;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 720px) {
+      main {
+        padding: 24px;
+      }
+
+      header {
+        display: block;
+      }
+
+      button {
+        margin-top: 18px;
+        width: 100%;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 
 <body>
-    <h1>Frontend</h1>
-    <p>This is a simple frontend application.</p>
+  <main>
+    <header>
+      <div>
+        <h1>Demo Docker Swarm</h1>
+        <p>Le frontend interroge le backend et affiche la replique qui repond.</p>
+      </div>
+      <button id="refresh" type="button">Rafraichir</button>
+    </header>
+
+    <div class="status" aria-live="polite">
+      <span id="status-dot" class="status-dot"></span>
+      <span id="status-text">Connexion au backend...</span>
+    </div>
+
+    <section class="grid" aria-label="Instance backend">
+      <div class="metric">
+        <span class="label">Instance backend</span>
+        <span id="instance" class="value">-</span>
+      </div>
+      <div class="metric">
+        <span class="label">Process ID</span>
+        <span id="pid" class="value">-</span>
+      </div>
+      <div class="metric">
+        <span class="label">Service</span>
+        <span id="service" class="value">-</span>
+      </div>
+      <div class="metric">
+        <span class="label">Demarrage</span>
+        <span id="started-at" class="value">-</span>
+      </div>
+    </section>
+
+    <section class="history">
+      <span class="label">Instances vues</span>
+      <ul id="history"></ul>
+    </section>
+  </main>
+
+  <script>
+    const refreshButton = document.querySelector("#refresh");
+    const statusDot = document.querySelector("#status-dot");
+    const statusText = document.querySelector("#status-text");
+    const fields = {
+      instance: document.querySelector("#instance"),
+      pid: document.querySelector("#pid"),
+      service: document.querySelector("#service"),
+      startedAt: document.querySelector("#started-at"),
+    };
+    const historyList = document.querySelector("#history");
+    const seenInstances = new Set();
+
+    const setStatus = (state, text) => {
+      statusDot.className = `status-dot ${state}`;
+      statusText.textContent = text;
+    };
+
+    const renderHistory = () => {
+      historyList.replaceChildren(
+        ...Array.from(seenInstances).map((instance) => {
+          const item = document.createElement("li");
+          item.textContent = instance;
+          return item;
+        }),
+      );
+    };
+
+    const loadInstance = async () => {
+      refreshButton.disabled = true;
+      setStatus("", "Connexion au backend...");
+
+      try {
+        const response = await fetch("/api/instance", { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        fields.instance.textContent = payload.instance || "-";
+        fields.pid.textContent = payload.pid || "-";
+        fields.service.textContent = payload.service || "-";
+        fields.startedAt.textContent = payload.startedAt
+          ? new Date(payload.startedAt).toLocaleString("fr-FR")
+          : "-";
+
+        if (payload.instance) {
+          seenInstances.add(payload.instance);
+          renderHistory();
+        }
+
+        setStatus("ok", "Backend joignable");
+      } catch (error) {
+        setStatus("error", `Backend indisponible: ${error.message}`);
+      } finally {
+        refreshButton.disabled = false;
+      }
+    };
+
+    refreshButton.addEventListener("click", loadInstance);
+    loadInstance();
+    window.setInterval(loadInstance, 5000);
+  </script>
 </body>
 
 </html>

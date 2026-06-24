@@ -1,4 +1,4 @@
-name: Build and push Docker images
+name: Build, Push and Deploy Docker Images
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 jobs:
   test-backend:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: ./backend
@@ -34,6 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     needs: test-backend
+
+    outputs:
+      image_tag: ${{ steps.vars.outputs.short_sha }}
 
     steps:
       - name: Checkout
@@ -67,3 +69,32 @@ jobs:
           file: ./frontend/dockerfile
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/app-frontend:${{ steps.vars.outputs.short_sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    needs: build-and-push
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Deploy on Swarm manager
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SWARM_USER: ${{ secrets.SWARM_USER }}
+          SWARM_MANAGER_HOST: ${{ secrets.SWARM_MANAGER_HOST }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_SECRET: ${{ secrets.DOCKERHUB_SECRET }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          scp -o StrictHostKeyChecking=no docker-stack.yml "$SWARM_USER@$SWARM_MANAGER_HOST:/tmp/docker-stack.yml"
+
+          ssh -o StrictHostKeyChecking=no "$SWARM_USER@$SWARM_MANAGER_HOST" \
+            "echo '$DOCKERHUB_SECRET' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin && \
+             DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' IMAGE_TAG='$IMAGE_TAG' \
+             docker stack deploy --with-registry-auth -c /tmp/docker-stack.yml app"
